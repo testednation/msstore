@@ -1,0 +1,8 @@
+{
+  "name": "Sideload",
+  "description": "Direct Microsoft Store MSIX/APPX package downloader with URL sanitization, resumable persistent transfer queue, background downloads, and PWA protocol integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
