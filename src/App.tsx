@@ -189,6 +189,7 @@ export default function App() {
   // Filters & toggles
   const [typeFilter, setTypeFilter] = useState<PackageTypeFilter>('All');
   const [archFilter, setArchFilter] = useState<ArchFilter>('All');
+  const [selectedPackageIds, setSelectedPackageIds] = useState<Set<string>>(() => new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [offlineMode, setOfflineMode] = useState(
     () => localStorage.getItem('sideload.offlineMode') === '1'
@@ -219,6 +220,11 @@ export default function App() {
   useEffect(() => {
     void refreshCatalogCache();
   }, [refreshCatalogCache]);
+
+  // Clear package selection whenever active product changes
+  useEffect(() => {
+    setSelectedPackageIds(new Set());
+  }, [productData?.productId]);
 
   const handleToggleSound = () => {
     const next = !soundMuted;
@@ -539,6 +545,55 @@ export default function App() {
     );
   };
 
+  const toggleSelectPackage = useCallback((fileId: string) => {
+    setSelectedPackageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileId)) {
+        next.delete(fileId);
+      } else {
+        next.add(fileId);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleSelectGroup = useCallback((groupFiles: PackageFile[]) => {
+    setSelectedPackageIds((prev) => {
+      const next = new Set(prev);
+      const allSelected =
+        groupFiles.length > 0 && groupFiles.every((f) => next.has(f.id));
+      if (allSelected) {
+        for (const f of groupFiles) next.delete(f.id);
+      } else {
+        for (const f of groupFiles) next.add(f.id);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleQueueSelectedFiles = useCallback(
+    (filesToQueue: PackageFile[]) => {
+      if (!productData || filesToQueue.length === 0) return;
+      void transferMgr.enqueueBatch(
+        filesToQueue,
+        {
+          productId: productData.productId,
+          appTitle: productData.title,
+          iconUrl: productData.iconUrl,
+        },
+        transferMode
+      );
+      setSelectedPackageIds((prev) => {
+        const next = new Set(prev);
+        for (const f of filesToQueue) {
+          next.delete(f.id);
+        }
+        return next;
+      });
+    },
+    [productData, transferMgr, transferMode]
+  );
+
   const handleNativeDownloadFile = (file: PackageFile) => {
     unlockAudio();
     const ok = triggerDirectSanitizedDownload(file.url, file.fileName);
@@ -610,6 +665,9 @@ export default function App() {
   const stagedTransfers = transferMgr.transfers.filter(
     (t) => t.status === 'paused'
   );
+  const failedTransfers = transferMgr.transfers.filter(
+    (t) => t.status === 'error'
+  );
   const completedTransfers = transferMgr.transfers.filter(
     (t) => t.status === 'completed'
   );
@@ -629,7 +687,10 @@ export default function App() {
         activeTab={activeTab}
         onSelectTab={setActiveTab}
         activeTransferCount={
-          activeTransfers.length + interruptedTransfers.length + stagedTransfers.length
+          activeTransfers.length +
+          interruptedTransfers.length +
+          stagedTransfers.length +
+          failedTransfers.length
         }
       />
 
@@ -1272,36 +1333,157 @@ export default function App() {
                   </section>
                 ) : (
                   <section className="divide-y divide-slate-200 dark:divide-slate-800 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-                    {groupedPackages.map(({ version, files }, groupIdx) => (
-                      <div key={version} className="divide-y divide-slate-100 dark:divide-slate-800/70">
-                        <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-950 px-4 py-2.5 text-xs sm:px-5">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">
-                              Version{' '}
-                              <span className="font-mono tabular-nums">{version}</span>
-                            </span>
-                            {groupIdx === 0 && (
-                              <span className="font-semibold text-[#4453E0] dark:text-[#7A87FF]">
-                                · Latest
+                    {groupedPackages.map(({ version, files }, groupIdx) => {
+                      const selectedInGroup = files.filter((f) =>
+                        selectedPackageIds.has(f.id)
+                      );
+                      const allInGroupSelected =
+                        files.length > 0 && selectedInGroup.length === files.length;
+
+                      return (
+                        <div
+                          key={version}
+                          className="divide-y divide-slate-100 dark:divide-slate-800/70"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 dark:bg-slate-950 px-4 py-2.5 text-xs sm:px-5">
+                            <div className="flex items-center gap-2.5">
+                              <input
+                                type="checkbox"
+                                checked={allInGroupSelected}
+                                onChange={() => toggleSelectGroup(files)}
+                                aria-label={`Select all packages in version ${version}`}
+                                title={
+                                  allInGroupSelected
+                                    ? `Deselect all in version ${version}`
+                                    : `Select all in version ${version}`
+                                }
+                                className="size-4 shrink-0 cursor-pointer rounded border-slate-300 dark:border-slate-700 accent-[#4453E0]"
+                              />
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">
+                                Version{' '}
+                                <span className="font-mono tabular-nums">{version}</span>
                               </span>
-                            )}
+                              {groupIdx === 0 && (
+                                <span className="font-semibold text-[#4453E0] dark:text-[#7A87FF]">
+                                  · Latest
+                                </span>
+                              )}
+                              {selectedInGroup.length > 0 && (
+                                <span className="font-mono text-[11px] font-medium text-[#4453E0] dark:text-[#7A87FF] tabular-nums">
+                                  · {selectedInGroup.length} selected
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2.5">
+                              <button
+                                type="button"
+                                disabled={selectedInGroup.length === 0}
+                                onClick={() => handleQueueSelectedFiles(selectedInGroup)}
+                                className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-[#4453E0] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#3846C9] disabled:cursor-not-allowed disabled:opacity-45 whitespace-nowrap shrink-0"
+                              >
+                                <Download className="size-3.5" />
+                                Queue Selected
+                                {selectedInGroup.length > 0
+                                  ? ` (${selectedInGroup.length})`
+                                  : ''}
+                              </button>
+                              <span className="font-mono tabular-nums text-slate-500 dark:text-slate-400">
+                                {files.length} file{files.length === 1 ? '' : 's'}
+                              </span>
+                            </div>
                           </div>
+
+                          {files.map((file) => (
+                            <PackageRow
+                              key={file.id}
+                              file={file}
+                              isLatest={groupIdx === 0}
+                              selected={selectedPackageIds.has(file.id)}
+                              onToggleSelect={toggleSelectPackage}
+                              transfer={
+                                transferLookup.get(`${productData.productId}::${file.url}`) ??
+                                transferLookup.get(`${productData.productId}::${file.rawUrl}`) ??
+                                transferLookup.get(`${productData.productId}::${file.fileName}`)
+                              }
+                              copied={copiedId === file.id}
+                              onCopySanitizedLink={(f) => void handleCopySanitizedLink(f)}
+                              onDownload={handleDownloadFile}
+                              onNativeDownload={handleNativeDownloadFile}
+                              onPause={transferMgr.pauseTransfer}
+                              onResume={transferMgr.resumeTransfer}
+                              onSaveCompleted={(t) => void transferMgr.saveCompletedFile(t)}
+                              onCancel={(id) => void transferMgr.cancelTransfer(id)}
+                            />
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </section>
+                )}
+
+                {/* Runtimes & Dependencies */}
+                {productData.runtimes.length > 0 && (() => {
+                  const selectedRuntimes = productData.runtimes.filter((rt) =>
+                    selectedPackageIds.has(rt.id)
+                  );
+                  const allRuntimesSelected =
+                    productData.runtimes.length > 0 &&
+                    selectedRuntimes.length === productData.runtimes.length;
+
+                  return (
+                    <section className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 px-4 py-2.5 text-xs sm:px-5">
+                        <div className="flex items-center gap-2.5">
+                          <input
+                            type="checkbox"
+                            checked={allRuntimesSelected}
+                            onChange={() => toggleSelectGroup(productData.runtimes)}
+                            aria-label="Select all runtime dependencies"
+                            className="size-4 shrink-0 cursor-pointer rounded border-slate-300 dark:border-slate-700 accent-[#4453E0]"
+                          />
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">
+                            Runtimes &amp; Framework Dependencies
+                          </span>
+                          {selectedRuntimes.length > 0 && (
+                            <span className="font-mono text-[11px] font-medium text-[#4453E0] dark:text-[#7A87FF] tabular-nums">
+                              · {selectedRuntimes.length} selected
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            disabled={selectedRuntimes.length === 0}
+                            onClick={() => handleQueueSelectedFiles(selectedRuntimes)}
+                            className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-[#4453E0] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#3846C9] disabled:cursor-not-allowed disabled:opacity-45 whitespace-nowrap shrink-0"
+                          >
+                            <Download className="size-3.5" />
+                            Queue Selected
+                            {selectedRuntimes.length > 0
+                              ? ` (${selectedRuntimes.length})`
+                              : ''}
+                          </button>
                           <span className="font-mono tabular-nums text-slate-500 dark:text-slate-400">
-                            {files.length} file{files.length === 1 ? '' : 's'}
+                            {productData.runtimes.length} file
+                            {productData.runtimes.length === 1 ? '' : 's'}
                           </span>
                         </div>
-
-                        {files.map((file) => (
+                      </div>
+                      <div className="divide-y divide-slate-100 dark:divide-slate-800/70">
+                        {productData.runtimes.map((rt) => (
                           <PackageRow
-                            key={file.id}
-                            file={file}
-                            isLatest={groupIdx === 0}
+                            key={rt.id}
+                            file={rt}
+                            isLatest={false}
+                            selected={selectedPackageIds.has(rt.id)}
+                            onToggleSelect={toggleSelectPackage}
                             transfer={
-                              transferLookup.get(`${productData.productId}::${file.url}`) ??
-                              transferLookup.get(`${productData.productId}::${file.rawUrl}`) ??
-                              transferLookup.get(`${productData.productId}::${file.fileName}`)
+                              transferLookup.get(`${productData.productId}::${rt.url}`) ??
+                              transferLookup.get(`${productData.productId}::${rt.rawUrl}`) ??
+                              transferLookup.get(`${productData.productId}::${rt.fileName}`)
                             }
-                            copied={copiedId === file.id}
+                            copied={copiedId === rt.id}
                             onCopySanitizedLink={(f) => void handleCopySanitizedLink(f)}
                             onDownload={handleDownloadFile}
                             onNativeDownload={handleNativeDownloadFile}
@@ -1312,46 +1494,9 @@ export default function App() {
                           />
                         ))}
                       </div>
-                    ))}
-                  </section>
-                )}
-
-                {/* Runtimes & Dependencies */}
-                {productData.runtimes.length > 0 && (
-                  <section className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-                    <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 px-4 py-2.5 text-xs sm:px-5">
-                      <span className="font-semibold text-slate-800 dark:text-slate-200">
-                        Runtimes &amp; Framework Dependencies
-                      </span>
-                      <span className="font-mono tabular-nums text-slate-500 dark:text-slate-400">
-                        {productData.runtimes.length} file
-                        {productData.runtimes.length === 1 ? '' : 's'}
-                      </span>
-                    </div>
-                    <div className="divide-y divide-slate-100 dark:divide-slate-800/70">
-                      {productData.runtimes.map((rt) => (
-                        <PackageRow
-                          key={rt.id}
-                          file={rt}
-                          isLatest={false}
-                          transfer={
-                            transferLookup.get(`${productData.productId}::${rt.url}`) ??
-                            transferLookup.get(`${productData.productId}::${rt.rawUrl}`) ??
-                            transferLookup.get(`${productData.productId}::${rt.fileName}`)
-                          }
-                          copied={copiedId === rt.id}
-                          onCopySanitizedLink={(f) => void handleCopySanitizedLink(f)}
-                          onDownload={handleDownloadFile}
-                          onNativeDownload={handleNativeDownloadFile}
-                          onPause={transferMgr.pauseTransfer}
-                          onResume={transferMgr.resumeTransfer}
-                          onSaveCompleted={(t) => void transferMgr.saveCompletedFile(t)}
-                          onCancel={(id) => void transferMgr.cancelTransfer(id)}
-                        />
-                      ))}
-                    </div>
-                  </section>
-                )}
+                    </section>
+                  );
+                })()}
 
                 {/* Sideload Install Tips */}
                 <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
@@ -1417,6 +1562,7 @@ export default function App() {
             onResume={transferMgr.resumeTransfer}
             onCancel={transferMgr.cancelTransfer}
             onSaveCompleted={(t) => void transferMgr.saveCompletedFile(t)}
+            onRetryAllFailed={transferMgr.retryAllFailed}
             onResumeAll={transferMgr.resumeAllInterrupted}
             onPauseAll={transferMgr.pauseAll}
             onClearCompleted={() => void transferMgr.clearCompleted()}

@@ -18,6 +18,8 @@ import { formatBytes } from '../utils/urlSanitizer';
 interface PackageRowProps {
   file: PackageFile;
   isLatest: boolean;
+  selected?: boolean;
+  onToggleSelect?: (fileId: string) => void;
   transfer?: TransferItem;
   copied: boolean;
   onCopySanitizedLink: (file: PackageFile) => void;
@@ -32,6 +34,8 @@ interface PackageRowProps {
 export const PackageRow: React.FC<PackageRowProps> = ({
   file,
   isLatest,
+  selected = false,
+  onToggleSelect,
   transfer,
   copied,
   onCopySanitizedLink,
@@ -61,9 +65,24 @@ export const PackageRow: React.FC<PackageRowProps> = ({
   const isError = transfer?.status === 'error';
 
   return (
-    <div className="px-4 py-3.5 transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/30 sm:px-5">
+    <div
+      className={`px-4 py-3.5 transition-colors sm:px-5 ${
+        selected
+          ? 'bg-[#4453E0]/[0.04] dark:bg-[#4453E0]/[0.09] hover:bg-[#4453E0]/[0.07] dark:hover:bg-[#4453E0]/[0.12]'
+          : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/30'
+      }`}
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 flex-1 items-start gap-3">
+          {onToggleSelect && (
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => onToggleSelect(file.id)}
+              aria-label={`Select ${file.fileName}`}
+              className="mt-1 size-4 shrink-0 cursor-pointer rounded border-slate-300 dark:border-slate-700 accent-[#4453E0]"
+            />
+          )}
           <div className="hidden size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 sm:flex">
             <FolderArchive className="size-4" />
           </div>

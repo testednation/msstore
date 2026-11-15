@@ -56,6 +56,7 @@ interface TransferQueuePanelProps {
   onResume: (id: string) => void;
   onCancel: (id: string) => void;
   onSaveCompleted: (item: TransferItem) => void;
+  onRetryAllFailed: () => void;
   onResumeAll: () => void;
   onPauseAll: () => void;
   onClearCompleted: () => void;
@@ -101,6 +102,7 @@ export const TransferQueuePanel: React.FC<TransferQueuePanelProps> = ({
   onResume,
   onCancel,
   onSaveCompleted,
+  onRetryAllFailed,
   onResumeAll,
   onPauseAll,
   onClearCompleted,
@@ -130,8 +132,9 @@ export const TransferQueuePanel: React.FC<TransferQueuePanelProps> = ({
   const activeCount = transfers.filter(
     (t) => t.status === 'downloading' || t.status === 'queued'
   ).length;
+  const failedCount = transfers.filter((t) => t.status === 'error').length;
   const interruptedCount = transfers.filter(
-    (t) => t.status === 'interrupted' || t.status === 'paused' || t.status === 'error'
+    (t) => t.status === 'interrupted' || t.status === 'paused'
   ).length;
   const completedCount = transfers.filter((t) => t.status === 'completed').length;
   const verifiedCount = transfers.filter(
@@ -313,6 +316,17 @@ export const TransferQueuePanel: React.FC<TransferQueuePanelProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {failedCount > 0 && (
+              <button
+                type="button"
+                onClick={onRetryAllFailed}
+                title="Re-initiate all downloads currently in a failed or error state while preserving metadata"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-rose-700 whitespace-nowrap shrink-0"
+              >
+                <RotateCcw className="size-3.5" />
+                Retry All Failed ({failedCount})
+              </button>
+            )}
             {interruptedCount > 0 && (
               <button
                 type="button"
@@ -407,6 +421,11 @@ export const TransferQueuePanel: React.FC<TransferQueuePanelProps> = ({
             <p className="text-xs text-slate-500 dark:text-slate-400">Staged / Paused</p>
             <p className="mt-0.5 font-mono text-lg font-semibold tabular-nums text-amber-600 dark:text-amber-400">
               {interruptedCount}
+              {failedCount > 0 && (
+                <span className="ml-1.5 font-sans text-xs font-semibold text-rose-600 dark:text-rose-400">
+                  · {failedCount} failed
+                </span>
+              )}
             </p>
           </div>
           <div>
@@ -829,7 +848,7 @@ export const TransferQueuePanel: React.FC<TransferQueuePanelProps> = ({
               <div
                 key={item.id}
                 className={`p-4 sm:p-5 transition-colors ${
-                  verStatus === 'mismatch'
+                  item.status === 'error' || verStatus === 'mismatch'
                     ? 'bg-rose-50/40 dark:bg-rose-950/20'
                     : isSelected
                       ? 'bg-[#4453E0]/[0.03] dark:bg-[#4453E0]/[0.08]'
@@ -908,7 +927,13 @@ export const TransferQueuePanel: React.FC<TransferQueuePanelProps> = ({
                       ) : (
                         <div className="flex items-center gap-2">
                           {(item.status === 'interrupted' || item.status === 'error') && (
-                            <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                            <AlertTriangle
+                              className={`size-4 shrink-0 ${
+                                item.status === 'error'
+                                  ? 'text-rose-600 dark:text-rose-400'
+                                  : 'text-amber-600 dark:text-amber-400'
+                              }`}
+                            />
                           )}
                           <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
                             {item.fileName}
@@ -1038,7 +1063,13 @@ export const TransferQueuePanel: React.FC<TransferQueuePanelProps> = ({
 
                 <div className="mt-3 pl-7">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <span className="text-slate-600 dark:text-slate-400">
+                    <span
+                      className={
+                        item.status === 'error' && item.error
+                          ? 'font-medium text-rose-600 dark:text-rose-400'
+                          : 'text-slate-600 dark:text-slate-400'
+                      }
+                    >
                       {item.error
                         ? item.error
                         : item.status === 'downloading'

@@ -917,7 +917,10 @@ export function useTransferManager(options: {
       if (item) {
         upsertTransferState({
           ...item,
+          mode: 'resumable',
           status: 'queued',
+          speedBps: 0,
+          etaSeconds: null,
           error: null,
           updatedAt: Date.now(),
         });
@@ -926,20 +929,82 @@ export function useTransferManager(options: {
     [upsertTransferState]
   );
 
+  const retryAllFailed = useCallback(() => {
+    unlockAudio();
+    const failedItems = transfersRef.current.filter((t) => t.status === 'error');
+    if (failedItems.length === 0) {
+      onToastRef.current?.('info', 'No failed downloads to retry.');
+      return;
+    }
+
+    const now = Date.now();
+    const toPersist: TransferItem[] = [];
+
+    const nextList = transfersRef.current.map((item) => {
+      if (item.status !== 'error') return item;
+
+      const ctrl = controllersRef.current.get(item.id);
+      if (ctrl) {
+        ctrl.abort();
+        controllersRef.current.delete(item.id);
+      }
+
+      const sanitized = sanitizePackageUrl(item.sanitizedUrl || item.rawUrl);
+      const updated: TransferItem = {
+        ...item,
+        sanitizedUrl: sanitized.ok ? sanitized.url : item.sanitizedUrl,
+        mode: 'resumable',
+        status: 'queued',
+        speedBps: 0,
+        etaSeconds: null,
+        error: null,
+        updatedAt: now,
+      };
+      toPersist.push(updated);
+      return updated;
+    });
+
+    transfersRef.current = nextList;
+    setTransfers(nextList);
+    for (const item of toPersist) {
+      void putTransfer(item);
+    }
+
+    onToastRef.current?.(
+      'info',
+      `Retrying ${toPersist.length} failed download${toPersist.length === 1 ? '' : 's'}…`
+    );
+  }, []);
+
   const resumeAllInterrupted = useCallback(() => {
     unlockAudio();
     const list = transfersRef.current.filter(
-      (t) => t.status === 'interrupted' || t.status === 'paused' || t.status === 'error'
+      (t) => t.status === 'interrupted' || t.status === 'paused'
     );
-    for (const item of list) {
-      upsertTransferState({
+    if (list.length === 0) return;
+    const now = Date.now();
+    const idSet = new Set(list.map((t) => t.id));
+    const toPersist: TransferItem[] = [];
+    const nextList = transfersRef.current.map((item) => {
+      if (!idSet.has(item.id)) return item;
+      const updated: TransferItem = {
         ...item,
+        mode: 'resumable',
         status: 'queued',
+        speedBps: 0,
+        etaSeconds: null,
         error: null,
-        updatedAt: Date.now(),
-      });
+        updatedAt: now,
+      };
+      toPersist.push(updated);
+      return updated;
+    });
+    transfersRef.current = nextList;
+    setTransfers(nextList);
+    for (const item of toPersist) {
+      void putTransfer(item);
     }
-  }, [upsertTransferState]);
+  }, []);
 
   const pauseAll = useCallback(() => {
     for (const item of transfersRef.current) {
@@ -1403,6 +1468,12 @@ export function useTransferManager(options: {
           nextStatus = 'completed';
         } else if (rawStatus === 'paused') {
           nextStatus = 'paused';
+        } else if (rawStatus === 'error') {
+          nextStatus = 'error';
+          nextError =
+            typeof rec.error === 'string' && rec.error.trim()
+              ? rec.error.trim()
+              : 'Previous transfer failed — click Retry or Retry All Failed.';
         } else {
           nextStatus = 'interrupted';
           nextError =
@@ -1532,6 +1603,7 @@ export function useTransferManager(options: {
     enqueueBatch,
     pauseTransfer,
     resumeTransfer,
+    retryAllFailed,
     resumeAllInterrupted,
     pauseAll,
     cancelTransfer,
