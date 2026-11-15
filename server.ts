@@ -270,13 +270,34 @@ async function startServer() {
               normalizedId.endsWith('/@vite/client') ||
               normalizedId.endsWith('/vite/dist/client/client.mjs')
             ) {
-              const target = 'transport.connect(createHMRHandler(handleMessage));';
-              if (!code.includes(target)) return null;
-              const replacement = disableHmr
-                ? '/* HMR disabled: skipped WebSocket connection */'
-                : 'transport.connect(createHMRHandler(handleMessage)).catch(() => {});';
+              let next = code
+                .replace(
+                  'else throw new SendBeforeConnectError("send was called before connect");',
+                  'else return;'
+                )
+                .replace(
+                  'else throw new SendBeforeConnectError("invoke was called before connect");',
+                  'else return;'
+                )
+                .replace(
+                  'ws.send(JSON.stringify(data));',
+                  'if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify(data));'
+                );
+
+              if (disableHmr) {
+                next = next.replace(
+                  'async connect(handlers) {\n\t\t\ttry {\n\t\t\t\tawait wsTransport.connect(handlers);',
+                  'async connect(handlers) {\n\t\t\tif (true) return;\n\t\t\ttry {\n\t\t\t\tawait wsTransport.connect(handlers);'
+                );
+              }
+
+              next = next.replace(
+                'transport.connect(createHMRHandler(handleMessage));',
+                'transport.connect(createHMRHandler(handleMessage)).catch(() => {});'
+              );
+
               return {
-                code: code.replace(target, replacement),
+                code: next,
                 map: null,
               };
             }
