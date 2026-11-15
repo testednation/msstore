@@ -5,15 +5,15 @@ import type {
   ProductPackageResponse,
   StoreRing,
   StoreSearchResult,
-} from '../types/store.js';
-import { normalizeSha256 } from '../utils/hash.js';
+} from '../types/store.ts';
+import { normalizeSha256 } from '../utils/hash.ts';
 import {
   buildProxyDownloadUrl,
   decodeHtmlEntities,
   formatBytes,
   sanitizeFileName,
   sanitizePackageUrl,
-} from '../utils/urlSanitizer.js';
+} from '../utils/urlSanitizer.ts';
 
 const FE3_ENDPOINT = 'https://fe3cr.delivery.mp.microsoft.com/ClientWebService/client.asmx';
 const FE3_SECURED_ENDPOINT = `${FE3_ENDPOINT}/secured`;
@@ -120,50 +120,113 @@ export async function searchMicrosoftStore(
   const cleanQuery = query.trim();
   if (!cleanQuery) return [];
 
-  const url = new URL('https://apps.microsoft.com/api/products/search');
-  url.searchParams.set('query', cleanQuery);
-  url.searchParams.set('hl', 'en-US');
-  url.searchParams.set('gl', market.toUpperCase());
+  try {
+    const url = new URL('https://apps.microsoft.com/api/products/search');
+    url.searchParams.set('query', cleanQuery);
+    url.searchParams.set('hl', 'en-US');
+    url.searchParams.set('gl', market.toUpperCase());
 
-  const res = await fetch(url.toString(), {
-    headers: {
-      Accept: 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-    },
-  });
+    const res = await fetch(url.toString(), {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      },
+    });
 
-  if (!res.ok) {
-    throw new Error(`Microsoft Store search failed (HTTP ${res.status})`);
+    if (res.ok) {
+      const json = (await res.json()) as {
+        productsList?: Array<{
+          productId?: string;
+          title?: string;
+          publisherName?: string;
+          iconUrl?: string;
+          averageRating?: number;
+          ratingCount?: number;
+          displayPrice?: string;
+          price?: number;
+          categories?: string[];
+        }>;
+      };
+
+      const list = Array.isArray(json.productsList) ? json.productsList : [];
+      if (list.length > 0) {
+        return list
+          .filter((item) => item.productId && item.title)
+          .slice(0, 20)
+          .map((item) => ({
+            productId: String(item.productId).toUpperCase(),
+            title: String(item.title),
+            publisher: item.publisherName ?? null,
+            iconUrl: normalizeImageUrl(item.iconUrl),
+            rating:
+              typeof item.averageRating === 'number' && item.averageRating > 0
+                ? item.averageRating
+                : null,
+            ratingsCount:
+              typeof item.ratingCount === 'number' && item.ratingCount > 0
+                ? item.ratingCount
+                : null,
+            price: item.displayPrice ?? (item.price === 0 ? 'Free' : null),
+            category:
+              Array.isArray(item.categories) && item.categories[0]
+                ? item.categories[0]
+                : null,
+          }));
+      }
+    }
+  } catch {
+    // Fall through to DisplayCatalog autosuggest
   }
 
-  const json = (await res.json()) as {
-    productsList?: Array<{
-      productId?: string;
-      title?: string;
-      publisherName?: string;
-      iconUrl?: string;
-      averageRating?: number;
-      ratingCount?: number;
-      displayPrice?: string;
-      price?: number;
-      categories?: string[];
+  const fallbackUrl = new URL(
+    'https://displaycatalog.mp.microsoft.com/v7.0/productFamilies/autosuggest'
+  );
+  fallbackUrl.searchParams.set('market', market.toUpperCase());
+  fallbackUrl.searchParams.set('languages', 'en-US');
+  fallbackUrl.searchParams.set('productFamilyNames', 'apps,games');
+  fallbackUrl.searchParams.set('query', cleanQuery);
+
+  const fbRes = await fetch(fallbackUrl.toString(), {
+    headers: { Accept: 'application/json' },
+  });
+
+  if (!fbRes.ok) {
+    throw new Error(`Microsoft Store search failed (HTTP ${fbRes.status})`);
+  }
+
+  const fbJson = (await fbRes.json()) as {
+    Results?: Array<{
+      ProductFamilyName?: string;
+      Products?: Array<{
+        ProductId?: string;
+        Title?: string;
+        Icon?: string;
+        Type?: string;
+      }>;
     }>;
   };
 
-  const list = Array.isArray(json.productsList) ? json.productsList : [];
-  return list
-    .filter((item) => item.productId && item.title)
-    .slice(0, 20)
-    .map((item) => ({
-      productId: String(item.productId).toUpperCase(),
-      title: String(item.title),
-      publisher: item.publisherName ?? null,
-      iconUrl: normalizeImageUrl(item.iconUrl),
-      rating: typeof item.averageRating === 'number' && item.averageRating > 0 ? item.averageRating : null,
-      ratingsCount: typeof item.ratingCount === 'number' && item.ratingCount > 0 ? item.ratingCount : null,
-      price: item.displayPrice ?? (item.price === 0 ? 'Free' : null),
-      category: Array.isArray(item.categories) && item.categories[0] ? item.categories[0] : null,
-    }));
+  const results: StoreSearchResult[] = [];
+  const seen = new Set<string>();
+  for (const group of fbJson.Results ?? []) {
+    for (const prod of group.Products ?? []) {
+      if (!prod.ProductId || !prod.Title) continue;
+      const pid = prod.ProductId.toUpperCase();
+      if (seen.has(pid)) continue;
+      seen.add(pid);
+      results.push({
+        productId: pid,
+        title: prod.Title,
+        publisher: null,
+        iconUrl: normalizeImageUrl(prod.Icon),
+        rating: null,
+        ratingsCount: null,
+        price: null,
+        category: prod.Type || group.ProductFamilyName || null,
+      });
+    }
+  }
+  return results.slice(0, 20);
 }
 
 interface ProductMetadata {

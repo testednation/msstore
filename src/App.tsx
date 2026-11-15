@@ -57,6 +57,11 @@ import {
   parseStoreInput,
   sanitizePackageUrl,
 } from './utils/urlSanitizer';
+import {
+  formatApiFailureMessage,
+  safeReadJson,
+  searchMicrosoftStoreClientFallback,
+} from './utils/clientStoreFallback';
 
 const PRESET_APPS = [
   { label: 'Spotify', id: '9NCBCSZSJRSB' },
@@ -282,9 +287,18 @@ export default function App() {
         const res = await fetch(
           `/api/packages?input=${encodeURIComponent(rawTarget)}&ring=${encodeURIComponent(targetRing)}`
         );
-        const json = (await res.json()) as ProductPackageResponse & { error?: string };
+        const parsedRes = await safeReadJson<ProductPackageResponse & { error?: string }>(res);
+        if (!parsedRes.isJson || !parsedRes.data) {
+          throw new Error(
+            formatApiFailureMessage(res, parsedRes.rawText, 'Package lookup failed')
+          );
+        }
+        const json = parsedRes.data;
         if (!res.ok) {
           throw new Error(json.error || `Lookup failed (HTTP ${res.status})`);
+        }
+        if (!Array.isArray(json.files)) {
+          throw new Error(json.error || 'Invalid package list returned from server.');
         }
 
         setProductData(json);
@@ -359,12 +373,24 @@ export default function App() {
     const timer = window.setTimeout(async () => {
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}`);
-        const json = (await res.json()) as { results?: StoreSearchResult[] };
+        const parsedRes = await safeReadJson<{ results?: StoreSearchResult[] }>(res);
+        if (res.ok && parsedRes.isJson && Array.isArray(parsedRes.data?.results)) {
+          if (!cancelled) {
+            setSearchResults(parsedRes.data.results);
+          }
+          return;
+        }
+        const fallbackResults = await searchMicrosoftStoreClientFallback(trimmed);
         if (!cancelled) {
-          setSearchResults(Array.isArray(json.results) ? json.results : []);
+          setSearchResults(fallbackResults);
         }
       } catch {
-        if (!cancelled) setSearchResults([]);
+        try {
+          const fallbackResults = await searchMicrosoftStoreClientFallback(trimmed);
+          if (!cancelled) setSearchResults(fallbackResults);
+        } catch {
+          if (!cancelled) setSearchResults([]);
+        }
       } finally {
         if (!cancelled) setIsSearching(false);
       }
@@ -421,10 +447,20 @@ export default function App() {
       setIsSearching(true);
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(parsed.query)}`);
-        const json = (await res.json()) as { results?: StoreSearchResult[] };
-        setSearchResults(Array.isArray(json.results) ? json.results : []);
+        const parsedRes = await safeReadJson<{ results?: StoreSearchResult[] }>(res);
+        if (res.ok && parsedRes.isJson && Array.isArray(parsedRes.data?.results)) {
+          setSearchResults(parsedRes.data.results);
+        } else {
+          const fallbackResults = await searchMicrosoftStoreClientFallback(parsed.query);
+          setSearchResults(fallbackResults);
+        }
       } catch {
-        setSearchResults([]);
+        try {
+          const fallbackResults = await searchMicrosoftStoreClientFallback(parsed.query);
+          setSearchResults(fallbackResults);
+        } catch {
+          setSearchResults([]);
+        }
       } finally {
         setIsSearching(false);
       }

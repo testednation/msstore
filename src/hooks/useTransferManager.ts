@@ -387,13 +387,25 @@ export function useTransferManager(options: {
 
           if (!res.ok) {
             let errText = `HTTP ${res.status}`;
-            try {
-              const errJson = (await res.json()) as { error?: string };
-              if (errJson?.error) errText = errJson.error;
-            } catch {
-              // ignore
+            const rawErr = await res.text().catch(() => '');
+            if (rawErr) {
+              try {
+                const errJson = JSON.parse(rawErr) as { error?: string };
+                if (errJson?.error) errText = errJson.error;
+              } catch {
+                if (res.status === 404 || /page could not be found/i.test(rawErr)) {
+                  errText = 'Proxy download route (/api/download) unavailable on this host.';
+                }
+              }
             }
             throw new Error(errText);
+          }
+
+          const respContentType = (res.headers.get('content-type') || '').toLowerCase();
+          if (respContentType.includes('text/html')) {
+            throw new Error(
+              'Download endpoint returned HTML instead of a binary package stream.'
+            );
           }
 
           // Check if server returned full 200 stream (without range slicing)

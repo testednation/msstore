@@ -3,9 +3,9 @@ import http from 'node:http';
 import https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fetchProductPackages, searchMicrosoftStore } from './src/server/msStoreService.js';
-import type { StoreRing } from './src/types/store.js';
-import { sanitizeFileName, sanitizePackageUrl } from './src/utils/urlSanitizer.js';
+import { fetchProductPackages, searchMicrosoftStore } from './src/server/msStoreService.ts';
+import type { StoreRing } from './src/types/store.ts';
+import { sanitizeFileName, sanitizePackageUrl } from './src/utils/urlSanitizer.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -247,6 +247,10 @@ async function startServer() {
 
   app.get('/api/download', handleDownload);
   app.head('/api/download', handleDownload);
+
+  app.all('/api/*', (_req, res) => {
+    res.status(404).json({ error: 'API route not found.' });
+  });
 
   const httpServer = http.createServer(app);
 
