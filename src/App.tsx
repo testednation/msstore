@@ -3,14 +3,18 @@ import {
   AlertTriangle,
   ArrowRight,
   Bell,
+  Check,
   CheckCircle2,
+  Copy,
   Download,
   Keyboard,
   Loader2,
+  Mail,
   Moon,
   PackageCheck,
   Play,
   Search,
+  Send,
   Sparkles,
   Star,
   Sun,
@@ -21,7 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import { BookmarkletModal } from './components/BookmarkletModal';
-import { Header, type ActiveTab } from './components/Header';
+import { FEEDBACK_EMAIL, Header, type ActiveTab } from './components/Header';
 import { OfflineCachePanel } from './components/OfflineCachePanel';
 import { OfflineIndicator } from './components/PWAInstallButton';
 import { PackageRow } from './components/PackageRow';
@@ -204,6 +208,10 @@ export default function App() {
   );
   const [bookmarkletOpen, setBookmarkletOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackSubject, setFeedbackSubject] = useState('Sideload App Feedback');
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [feedbackEmailCopied, setFeedbackEmailCopied] = useState(false);
 
   // Cached offline catalog
   const [cachedProducts, setCachedProducts] = useState<ProductPackageResponse[]>([]);
@@ -516,6 +524,10 @@ export default function App() {
       }
 
       if (e.key === 'Escape') {
+        if (feedbackOpen) {
+          setFeedbackOpen(false);
+          return;
+        }
         if (shortcutsOpen) {
           setShortcutsOpen(false);
           return;
@@ -546,7 +558,7 @@ export default function App() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [bookmarkletOpen, executeLookup, shortcutsOpen]);
+  }, [bookmarkletOpen, executeLookup, feedbackOpen, shortcutsOpen]);
 
   const handleCopySanitizedLink = async (file: PackageFile) => {
     const sanitized = sanitizePackageUrl(file.url);
@@ -728,6 +740,7 @@ export default function App() {
           stagedTransfers.length +
           failedTransfers.length
         }
+        onOpenFeedback={() => setFeedbackOpen(true)}
       />
 
       <main className="mx-auto max-w-5xl px-4 pb-28 pt-6 sm:px-6 sm:pt-8">
@@ -748,6 +761,16 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setFeedbackOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-2.5 py-1.5 font-medium text-slate-700 dark:text-slate-300 hover:border-[#4453E0]/40 hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap shrink-0"
+              title={`Contact & Feedback (${FEEDBACK_EMAIL})`}
+            >
+              <Mail className="size-3.5 text-[#4453E0] dark:text-[#7A87FF]" />
+              <span>Feedback: {FEEDBACK_EMAIL}</span>
+            </button>
+
             <button
               type="button"
               onClick={handleToggleSound}
@@ -1791,6 +1814,173 @@ export default function App() {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {feedbackOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="feedback-modal-title"
+          onClick={() => setFeedbackOpen(false)}
+        >
+          <div
+            className="w-full max-w-lg rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2.5">
+                <div className="flex size-9 items-center justify-center rounded-lg bg-[#4453E0]/10 text-[#4453E0] dark:text-[#7A87FF]">
+                  <Mail className="size-4" />
+                </div>
+                <div>
+                  <h2
+                    id="feedback-modal-title"
+                    className="text-base font-semibold text-slate-900 dark:text-white"
+                  >
+                    Contact &amp; Feedback
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Report package issues, request features, or share feedback
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFeedbackOpen(false)}
+                aria-label="Close feedback modal"
+                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Feedback Email
+                  </p>
+                  <a
+                    href={`mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(
+                      feedbackSubject || 'Sideload App Feedback'
+                    )}`}
+                    className="mt-0.5 inline-block font-mono text-sm font-semibold text-[#4453E0] dark:text-[#7A87FF] hover:underline"
+                  >
+                    {FEEDBACK_EMAIL}
+                  </a>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(FEEDBACK_EMAIL);
+                        setFeedbackEmailCopied(true);
+                        addToast('success', `Copied ${FEEDBACK_EMAIL} to clipboard.`);
+                        window.setTimeout(() => setFeedbackEmailCopied(false), 1800);
+                      } catch {
+                        addToast('error', 'Could not copy email automatically.');
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    {feedbackEmailCopied ? (
+                      <>
+                        <Check className="size-3.5 text-emerald-500" />
+                        <span>Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="size-3.5" />
+                        <span>Copy Email</span>
+                      </>
+                    )}
+                  </button>
+                  <a
+                    href={`mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(
+                      feedbackSubject || 'Sideload App Feedback'
+                    )}&body=${encodeURIComponent(feedbackMessage)}`}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#4453E0] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#3846C9]"
+                  >
+                    <Mail className="size-3.5" />
+                    <span>Email App</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <form
+              className="mt-4 space-y-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const subject = feedbackSubject.trim() || 'Sideload App Feedback';
+                const body = feedbackMessage.trim();
+                const mailtoUrl = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(
+                  subject
+                )}&body=${encodeURIComponent(body)}`;
+                const a = document.createElement('a');
+                a.href = mailtoUrl;
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                addToast('info', `Opening mail client for ${FEEDBACK_EMAIL}…`);
+              }}
+            >
+              <div>
+                <label
+                  htmlFor="feedback-subject"
+                  className="block text-xs font-medium text-slate-700 dark:text-slate-300"
+                >
+                  Subject
+                </label>
+                <input
+                  id="feedback-subject"
+                  type="text"
+                  value={feedbackSubject}
+                  onChange={(e) => setFeedbackSubject(e.target.value)}
+                  placeholder="Sideload App Feedback"
+                  className="mt-1 h-9 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 text-xs text-slate-900 dark:text-white focus:border-[#4453E0] focus:outline-none focus:ring-2 focus:ring-[#4453E0]/20"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="feedback-message"
+                  className="block text-xs font-medium text-slate-700 dark:text-slate-300"
+                >
+                  Message
+                </label>
+                <textarea
+                  id="feedback-message"
+                  rows={4}
+                  value={feedbackMessage}
+                  onChange={(e) => setFeedbackMessage(e.target.value)}
+                  placeholder="Describe any Store Product ID issues, download feedback, or feature suggestions…"
+                  className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 p-3 text-xs text-slate-900 dark:text-white focus:border-[#4453E0] focus:outline-none focus:ring-2 focus:ring-[#4453E0]/20"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setFeedbackOpen(false)}
+                  className="rounded-lg border border-slate-200 dark:border-slate-700 px-3.5 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  Close
+                </button>
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#4453E0] px-4 py-2 text-xs font-semibold text-white hover:bg-[#3846C9]"
+                >
+                  <Send className="size-3.5" />
+                  <span>Send Feedback to {FEEDBACK_EMAIL}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
